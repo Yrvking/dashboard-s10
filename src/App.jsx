@@ -1,12 +1,31 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, 
-  LineChart, Line, ComposedChart, Area 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  ComposedChart,
+  Area,
 } from 'recharts';
-import { 
-  Calculator, AlertCircle, TrendingUp, DollarSign, FileText, 
-  Briefcase, Search, Filter, ChevronDown, ChevronUp, Users 
+import {
+  Calculator,
+  AlertCircle,
+  TrendingUp,
+  DollarSign,
+  FileText,
+  Briefcase,
+  Search,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  Users,
 } from 'lucide-react';
 
 // --- DATA MOCK (Simulando la estructura de tu CSV S10) ---
@@ -26,6 +45,7 @@ const INITIAL_DATA = [
       'TRABAJOS EN PISO 14 Y 15 ESTA SIENDO EJECUTADO POR OTRO PROVEEDOR. Se requiere liberar frente.',
     fecha: '2025-10-12',
     monto_costo_directo_os: 150000.0 / 1.18,
+    subcontrato: 'INSTALACIONES ELÉCTRICAS PISOS 14 Y 15',
   },
   {
     id: 2,
@@ -41,6 +61,7 @@ const INITIAL_DATA = [
     comentarios: 'Retraso en entrega de materiales. Pendiente firma de adenda.',
     fecha: '2025-10-20',
     monto_costo_directo_os: 36842.72 / 1.18,
+    subcontrato: 'ESTRUCTURAS METÁLICAS – FASE 1',
   },
   {
     id: 3,
@@ -56,6 +77,7 @@ const INITIAL_DATA = [
     comentarios: 'Regularización de metrados.',
     fecha: '2025-10-26',
     monto_costo_directo_os: 36842.72 / 1.18,
+    subcontrato: 'ESTRUCTURAS METÁLICAS – FASE 1',
   },
   {
     id: 4,
@@ -71,6 +93,7 @@ const INITIAL_DATA = [
     comentarios: 'Inicio de obra. Sin observaciones mayores.',
     fecha: '2025-11-03',
     monto_costo_directo_os: 85000.0 / 1.18,
+    subcontrato: 'ACABADOS DRYWALL Y PINTURA NIVELES 7–8',
   },
   {
     id: 5,
@@ -86,6 +109,7 @@ const INITIAL_DATA = [
     comentarios: 'Pendiente entrega de dossier de calidad para cierre.',
     fecha: '2025-11-09',
     monto_costo_directo_os: 210000.0 / 1.18,
+    subcontrato: 'SISTEMA CONTRA INCENDIOS – INSTALACIÓN INTEGRAL',
   },
 ];
 
@@ -433,7 +457,9 @@ export default function App() {
               n_contrato: row['N° Subcontrato'] || row['Nº Subcontrato'] || null,
               orden_servicio:
                 normalizeText(
-                  row['N° O.C. / O.S.'] || row['O.S. / Val'] || row['Orden Servicio']
+                  row['N° O.C. / O.S.'] ||
+                    row['O.S. / Val'] ||
+                    row['Orden Servicio']
                 ) || '',
               contratado: contratadoConIgv,
               costo_directo: normalizeNumber(row['Costo Directo (S/.)']),
@@ -444,6 +470,13 @@ export default function App() {
               estado: row['Estado'] || 'Sin Estado',
               comentarios: row['Comentarios'] || '',
               fecha: row['Fecha'] ? String(row['Fecha']) : null,
+              // NUEVO: descripción de subcontrato si existe en la hoja plana
+              subcontrato: normalizeText(
+                row['Subcontrato'] ||
+                  row['Descripción Subcontrato'] ||
+                  row['Descripcion Subcontrato'] ||
+                  ''
+              ),
             };
           })
           .filter((r) => r.subcontratista && r.orden_servicio);
@@ -814,7 +847,7 @@ export default function App() {
                   <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                     <tr>
                       <th className="px-4 py-3">Proveedor / Especialidad</th>
-                      <th className="px-4 py-3">O.S. / Val</th>
+                      <th className="px-4 py-3">O.S. / Val / Subcontrato</th>
                       <th className="px-4 py-3 text-right">Contratado (c/ IGV)</th>
                       <th className="px-4 py-3 text-right">
                         Costo Directo OS (s/ IGV)
@@ -848,6 +881,11 @@ export default function App() {
                           <div className="text-xs text-slate-500">
                             {item.n_valorizacion}
                           </div>
+                          {item.subcontrato && (
+                            <div className="text-xs text-slate-400 italic mt-1">
+                              {item.subcontrato}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-slate-700">
                           {formatCurrency(item.contratado)}
