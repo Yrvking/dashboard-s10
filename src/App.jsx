@@ -23,6 +23,9 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
+  Download,
+  Printer,
+  Settings,
 } from "lucide-react";
 
 // -----------------------------------------------------------------------------
@@ -184,6 +187,30 @@ const buildRecordKey = (item) =>
     normalizeText(item.subcontrato || "").toUpperCase(),
   ].join("||");
 
+// Export genérico a Excel
+const exportToExcel = (rows, filename) => {
+  if (!rows || !rows.length) {
+    alert("No hay registros para exportar con los filtros actuales.");
+    return;
+  }
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+  XLSX.writeFile(workbook, filename);
+};
+
+// Tooltip custom para el gráfico de torta (texto claro sobre fondo oscuro)
+const renderStatusTooltip = ({ active, payload }) => {
+  if (!active || !payload || !payload.length) return null;
+  const item = payload[0];
+  return (
+    <div className="px-3 py-2 rounded-md border border-slate-700 bg-slate-950 text-xs text-slate-100 shadow-lg">
+      <div className="font-semibold mb-1">{item.name}</div>
+      <div>{formatCurrency(item.value || 0)}</div>
+    </div>
+  );
+};
+
 // -----------------------------------------------------------------------------
 // PARSER SUBCONTRATOS_ADMINISTRADOR
 // -----------------------------------------------------------------------------
@@ -224,7 +251,9 @@ const parseSubcontratosAdministrador = (matrix) => {
     (h1, h2) =>
       contains(h1, "Costo Directo") || contains(h2, "Costo Directo")
   );
-  const idxRetenido = findCol((h1, h2) => contains(h1, "Retenido") || contains(h2, "Retenido"));
+  const idxRetenido = findCol(
+    (h1, h2) => contains(h1, "Retenido") || contains(h2, "Retenido")
+  );
   const idxAdelCalc = findCol(
     (h1, h2) =>
       (contains(h1, "Adelanto") || contains(h1, "Adelantos")) &&
@@ -232,7 +261,9 @@ const parseSubcontratosAdministrador = (matrix) => {
   );
   const idxAdelAmort = findCol(
     (h1, h2) =>
-      (contains(h1, "Adelanto") || contains(h1, "Adelantos") || contains(h2, "Adelanto")) &&
+      (contains(h1, "Adelanto") ||
+        contains(h1, "Adelantos") ||
+        contains(h2, "Adelanto")) &&
       (contains(h2, "Amort") || contains(h1, "Amort"))
   );
   const idxAdelOtorg = findCol(
@@ -294,20 +325,16 @@ const parseSubcontratosAdministrador = (matrix) => {
           ? normalizeText(row[idxEsp])
           : "";
       const contratado =
-        idxContratado !== -1
-          ? normalizeNumber(row[idxContratado])
-          : 0;
+        idxContratado !== -1 ? normalizeNumber(row[idxContratado]) : 0;
       const costoDirecto =
-        idxCostoDirecto !== -1
-          ? normalizeNumber(row[idxCostoDirecto])
-          : 0;
+        idxCostoDirecto !== -1 ? normalizeNumber(row[idxCostoDirecto]) : 0;
       const avancePct =
         idxValPct !== -1 ? normalizeNumber(row[idxValPct]) : 0;
       const adelCalc =
         idxAdelCalc !== -1 ? normalizeNumber(row[idxAdelCalc]) : 0;
       const adelOtorg =
         idxAdelOtorg !== -1 ? normalizeNumber(row[idxAdelOtorg]) : 0;
-      const adelAmort =
+      const adelAmortOS =
         idxAdelAmort !== -1 ? normalizeNumber(row[idxAdelAmort]) : 0;
       const retenidoOs =
         idxRetenido !== -1 ? normalizeNumber(row[idxRetenido]) : 0;
@@ -332,21 +359,23 @@ const parseSubcontratosAdministrador = (matrix) => {
         costo_directo: costoDirecto,
         adelanto_calculado: adelCalc || null,
         adelanto_otorgado: adelOtorg || null,
-        adelanto_amortizado: adelAmort || null,
+        adelanto_amortizado: null, // lo llenaremos con la suma de semanas
         adelanto: adelOtorg || adelCalc || 0,
         avance_pct: avancePct,
         pendiente_por: pendientePor,
         saldo_por_ejecutar:
           contratado && costoDirecto ? contratado - costoDirecto : null,
         saldo_adelanto:
-          (adelOtorg || adelCalc) && adelAmort
-            ? (adelOtorg || adelCalc) - adelAmort
+          (adelOtorg || adelCalc) && adelAmortOS
+            ? (adelOtorg || adelCalc) - adelAmortOS
             : null,
         valorizaciones: [],
         retenido_os: retenidoOs,
       };
 
-      // barrer semanas
+      // barrer semanas y acumular amortización de adelanto
+      let adelAmortSemanas = 0;
+
       r += 1;
       while (r < matrix.length) {
         const row2 = matrix[r] || [];
@@ -368,6 +397,12 @@ const parseSubcontratosAdministrador = (matrix) => {
               : 0;
           const reten =
             idxRetenido !== -1 ? normalizeNumber(row2[idxRetenido]) : 0;
+          const adelAmortSemana =
+            idxAdelAmort !== -1
+              ? normalizeNumber(row2[idxAdelAmort])
+              : 0;
+
+          adelAmortSemanas += adelAmortSemana;
 
           contrato.valorizaciones.push({
             n_valorizacion: nVal,
@@ -375,6 +410,7 @@ const parseSubcontratosAdministrador = (matrix) => {
             avance_pct: pct,
             costo_directo: cd,
             retenido: reten,
+            adelanto_amortizado_semana: adelAmortSemana,
           });
 
           r += 1;
@@ -393,7 +429,12 @@ const parseSubcontratosAdministrador = (matrix) => {
             )
           : contrato.retenido_os || 0;
 
+      const adelantoAmortTotal =
+        adelAmortSemanas || adelAmortOS || 0;
+
       contrato.retenido_total = retenidoTotal;
+      contrato.adelanto_amortizado =
+        adelantoAmortTotal > 0 ? adelantoAmortTotal : null;
 
       result.push(contrato);
       continue;
@@ -452,6 +493,11 @@ const enrichRecord = (item, idOverride) => ({
 });
 
 // -----------------------------------------------------------------------------
+// CONSTANTES DE COLOR
+// -----------------------------------------------------------------------------
+const STATUS_COLORS = ["#22c55e", "#f97316", "#0ea5e9", "#a855f7", "#64748b"];
+
+// -----------------------------------------------------------------------------
 // MAIN COMPONENT
 // -----------------------------------------------------------------------------
 export default function App() {
@@ -496,8 +542,11 @@ export default function App() {
   // scroll “tipo Procore”
   const [scrollMax, setScrollMax] = useState(0);
   const [scrollValue, setScrollValue] = useState(0);
-
   const bottomScrollRef = useRef(null);
+
+  // Ajustes / pseudo-admin
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
 
   // Guardar en localStorage
   useEffect(() => {
@@ -505,6 +554,14 @@ export default function App() {
       window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
     }
   }, [data]);
+
+  // Título del documento (para PDF / impresión)
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.title =
+        "Dashboard Subcontratos - Inversiones SAURIS SAC";
+    }
+  }, []);
 
   // Import Excel
   const handleExcelImport = (event) => {
@@ -609,7 +666,8 @@ export default function App() {
             return {
               subcontratista: normalizeText(row["Subcontratista"]),
               especialidad: normalizeText(row["Especialidad"]),
-              n_contrato: row["N° Subcontrato"] || row["Nº Subcontrato"] || null,
+              n_contrato:
+                row["N° Subcontrato"] || row["Nº Subcontrato"] || null,
               orden_servicio:
                 normalizeText(
                   row["N° O.C. / O.S."] ||
@@ -722,8 +780,7 @@ export default function App() {
       if (contrato.valorizaciones && contrato.valorizaciones.length > 0) {
         const totalCd = contrato.valorizaciones.reduce(
           (acc, v) =>
-            acc +
-            (v.costo_directo || v.monto_valorizacion || 0),
+            acc + (v.costo_directo || v.monto_valorizacion || 0),
           0
         );
         const maxPct = contrato.valorizaciones.reduce(
@@ -884,17 +941,18 @@ export default function App() {
     return Object.values(map);
   }, [filteredData]);
 
-  const STATUS_COLORS = ["#22c55e", "#f97316", "#0ea5e9", "#a855f7", "#64748b"];
-
-  // subcontratos críticos (más registros)
-  const criticalContracts = useMemo(
-    () =>
-      [...filteredData]
-        .filter((item) => !item.cerrado)
-        .sort((a, b) => (a.avance_pct || 0) - (b.avance_pct || 0))
-        .slice(0, 10),
-    [filteredData]
-  );
+  // subcontratos críticos (menor avance y abiertos; prioritizando <20%)
+  const criticalContracts = useMemo(() => {
+    const abiertos = filteredData.filter((item) => !item.cerrado);
+    const criticos = abiertos.filter(
+      (item) => (item.avance_pct || 0) < 20
+    );
+    const base = criticos.length > 0 ? criticos : abiertos;
+    return base
+      .slice()
+      .sort((a, b) => (a.avance_pct || 0) - (b.avance_pct || 0))
+      .slice(0, 20);
+  }, [filteredData]);
 
   // Fondo de garantía
   const fgMetrics = useMemo(() => {
@@ -1092,11 +1150,126 @@ export default function App() {
     setScrollValue(next);
   };
 
-  const STATUS_COLORS_MAP = STATUS_COLORS;
+  const handleExportDetalle = () => {
+    const rows = sortedDetailData.map((item) => {
+      const cdContr =
+        item.monto_costo_directo_os ||
+        (item.contratado ? item.contratado / 1.18 : 0);
+      const cdAcum = item.costo_directo || 0;
+      const saldoCd = cdContr - cdAcum;
+
+      return {
+        Proveedor: item.subcontratista,
+        Especialidad: item.especialidad,
+        OS: item.orden_servicio,
+        Subcontrato: item.subcontrato,
+        Contratado_IGV: item.contratado,
+        CD_Contratado: cdContr,
+        Avance_pct: item.avance_pct,
+        CD_Acumulado: cdAcum,
+        Saldo_CD: saldoCd,
+        Adelanto: item.adelanto || 0,
+        Adelanto_Amortizado: item.adelanto_amortizado || 0,
+        Cerrado: item.cerrado ? "Sí" : "No",
+        Estado: item.estado,
+      };
+    });
+
+    exportToExcel(rows, "detalle_subcontratos_filtrado.xlsx");
+  };
+
+  const handleExportCriticos = () => {
+    const rows = criticalContracts.map((item) => {
+      const cdContr =
+        item.monto_costo_directo_os ||
+        (item.contratado ? item.contratado / 1.18 : 0);
+      const cdAcum = item.costo_directo || 0;
+      const saldoCd = cdContr - cdAcum;
+
+      return {
+        Proveedor: item.subcontratista,
+        OS: item.orden_servicio,
+        Subcontrato: item.subcontrato,
+        Avance_pct: item.avance_pct,
+        CD_Contratado: cdContr,
+        CD_Acumulado: cdAcum,
+        Saldo_CD: saldoCd,
+        Estado: item.estado,
+        Cerrado: item.cerrado ? "Sí" : "No",
+      };
+    });
+
+    exportToExcel(rows, "subcontratos_criticos.xlsx");
+  };
+
+  const handleExportDatasetCompleto = () => {
+    const rows = data.map((item) => ({
+      Proveedor: item.subcontratista,
+      Especialidad: item.especialidad,
+      OS: item.orden_servicio,
+      Subcontrato: item.subcontrato,
+      Contratado_IGV: item.contratado,
+      CD_Contratado:
+        item.monto_costo_directo_os ||
+        (item.contratado ? item.contratado / 1.18 : 0),
+      Avance_pct: item.avance_pct,
+      CD_Acumulado: item.costo_directo,
+      Adelanto: item.adelanto || 0,
+      Adelanto_Calculado: item.adelanto_calculado || 0,
+      Adelanto_Amortizado: item.adelanto_amortizado || 0,
+      Retenido: item.retenido || 0,
+      Estado: item.estado,
+      Cerrado: item.cerrado ? "Sí" : "No",
+    }));
+    exportToExcel(rows, "dataset_subcontratos_completo.xlsx");
+  };
+
+  const handleResetData = () => {
+    if (
+      !window.confirm(
+        "Esto borrará el último Excel cargado en este navegador y restaurará los datos de ejemplo. ¿Continuar?"
+      )
+    ) {
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+    }
+    const reset = INITIAL_DATA.map((item, idx) =>
+      enrichRecord(item, idx + 1)
+    );
+    setData(reset);
+    setSimulatedId("");
+    setTargetPct(null);
+  };
+
+  const handleExportPdf = () => {
+    const prevTitle =
+      typeof document !== "undefined" ? document.title : "";
+    if (typeof document !== "undefined") {
+      document.title =
+        "Reporte Subcontratos - Inversiones SAURIS SAC";
+    }
+    window.print();
+    if (typeof document !== "undefined" && prevTitle) {
+      document.title = prevTitle;
+    }
+  };
+
+  const handleAdminLogin = () => {
+    if (adminPassword === "padova123") {
+      setIsAdmin(true);
+      setAdminPassword("");
+    } else {
+      alert("Clave incorrecta.");
+    }
+  };
 
   // ---------------------------------------------------------------------------
   // RENDER
   // ---------------------------------------------------------------------------
+  const STATUS_COLORS_MAP = STATUS_COLORS;
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 pb-10">
       {/* HEADER */}
@@ -1106,21 +1279,35 @@ export default function App() {
             <div>
               <h1 className="text-2xl font-bold flex items-center gap-2">
                 <Calculator className="text-sky-400" />
-                <span>Control de Subcontratos &amp; Valorizaciones</span>
+                <span>
+                  Control de Subcontratos &amp; Valorizaciones
+                </span>
               </h1>
               <p className="text-slate-400 text-sm mt-1">
-                Dashboard ejecutivo para seguimiento de avance físico y
-                financiero de subcontratos S10.
+                Inversiones SAURIS SAC · Dashboard ejecutivo de avance
+                físico y financiero de subcontratos S10.
               </p>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-3 text-xs bg-slate-900/70 py-2 px-4 rounded-lg border border-slate-700">
-                <span className="text-slate-400">Fuente:</span>
+              <div className="hidden sm:flex flex-col items-end text-[11px] bg-slate-900/70 py-2 px-4 rounded-lg border border-slate-700">
+                <span className="text-slate-400">Fuente datos:</span>
                 <span className="font-semibold text-emerald-300">
                   Subcontratos_Administrador.xlsx / DashboardData
                 </span>
+                <span className="text-slate-500 mt-1">
+                  Desarrollado por Wilfredo Yrving Leon Chappe
+                </span>
               </div>
+
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                className="inline-flex items-center px-3 py-2 rounded-lg bg-slate-800 text-slate-100 text-xs font-semibold border border-slate-600 shadow hover:bg-slate-700 transition"
+              >
+                <Printer size={14} className="mr-1" />
+                Exportar PDF
+              </button>
 
               <label className="cursor-pointer inline-flex items-center px-3 py-2 rounded-lg bg-emerald-500 text-white text-xs font-semibold shadow hover:bg-emerald-600 transition">
                 <input
@@ -1150,6 +1337,12 @@ export default function App() {
             >
               Detalle de subcontratos
             </TabButton>
+            <TabButton
+              active={activeTab === "ajustes"}
+              onClick={() => setActiveTab("ajustes")}
+            >
+              Ajustes
+            </TabButton>
           </div>
           <button
             type="button"
@@ -1174,7 +1367,11 @@ export default function App() {
               onClick={() => setFiltersOpen((prev) => !prev)}
               className="text-slate-400 hover:text-slate-200"
             >
-              {filtersOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+              {filtersOpen ? (
+                <ChevronUp size={18} />
+              ) : (
+                <ChevronDown size={18} />
+              )}
             </button>
           </div>
 
@@ -1292,8 +1489,8 @@ export default function App() {
                   </div>
 
                   <p className="text-slate-400 text-xs mb-4 relative z-10">
-                    Acumula las valorizaciones por O.S. y proyecta el impacto
-                    en el costo directo según una meta de avance.
+                    Acumula las valorizaciones por O.S. y proyecta el
+                    impacto en el costo directo según una meta de avance.
                   </p>
 
                   {simulatorOpen && (
@@ -1337,8 +1534,11 @@ export default function App() {
                             <div className="mt-1 text-emerald-300">
                               {simulationResult.item.label_valorizacion ? (
                                 <>
-                                  {simulationResult.item.label_valorizacion} ·
-                                  % acum:{" "}
+                                  {
+                                    simulationResult.item
+                                      .label_valorizacion
+                                  }{" "}
+                                  · % acum:{" "}
                                   {formatPct(
                                     simulationResult.currentPct
                                   )}
@@ -1376,11 +1576,15 @@ export default function App() {
                             <div className="flex justify-between text-[11px] text-slate-400 mt-1">
                               <span>
                                 Actual:{" "}
-                                {formatPct(simulationResult.currentPct)}
+                                {formatPct(
+                                  simulationResult.currentPct
+                                )}
                               </span>
                               <span>
                                 Meta:{" "}
-                                {formatPct(simulationResult.newTotalPct)}
+                                {formatPct(
+                                  simulationResult.newTotalPct
+                                )}
                               </span>
                             </div>
                           </div>
@@ -1470,9 +1674,19 @@ export default function App() {
               <div className="lg:col-span-2 space-y-6">
                 {/* críticos */}
                 <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-4">
-                  <h4 className="text-xs font-semibold text-slate-200 mb-3">
-                    Subcontratos críticos (menor avance y abiertos)
-                  </h4>
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-xs font-semibold text-slate-200">
+                      Subcontratos críticos (menor avance y abiertos)
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={handleExportCriticos}
+                      className="inline-flex items-center gap-1 text-[11px] text-sky-300 hover:text-sky-100 border border-sky-500/60 px-2 py-1 rounded-md bg-slate-900/60"
+                    >
+                      <Download size={14} />
+                      Exportar
+                    </button>
+                  </div>
                   <div className="space-y-2 text-[11px] max-h-[230px] overflow-y-auto pr-1">
                     {criticalContracts.length === 0 && (
                       <p className="text-slate-500">
@@ -1483,7 +1697,8 @@ export default function App() {
                       const cdContrat =
                         item.monto_costo_directo_os ||
                         (item.contratado ? item.contratado / 1.18 : 0);
-                      const saldoCd = cdContrat - (item.costo_directo || 0);
+                      const saldoCd =
+                        cdContrat - (item.costo_directo || 0);
 
                       return (
                         <div
@@ -1545,16 +1760,7 @@ export default function App() {
                             ))}
                           </Pie>
                           <RechartsTooltip
-                            contentStyle={{
-                              backgroundColor: "#020617",
-                              border: "1px solid #1e293b",
-                              borderRadius: "8px",
-                              color: "#e5e7eb",
-                            }}
-                            formatter={(value, name) => [
-                              formatCurrency(value),
-                              name,
-                            ]}
+                            content={renderStatusTooltip}
                           />
                         </PieChart>
                       </ResponsiveContainer>
@@ -1600,12 +1806,16 @@ export default function App() {
                             <th className="py-1 px-1 text-right whitespace-nowrap">
                               <button
                                 type="button"
-                                onClick={() => handleSubSummarySort("contracts")}
+                                onClick={() =>
+                                  handleSubSummarySort("contracts")
+                                }
                                 className="inline-flex items-center gap-1 hover:text-slate-200"
                               >
                                 # Subc.
                                 <span>
-                                  {subSummarySortIndicator("contracts")}
+                                  {subSummarySortIndicator(
+                                    "contracts"
+                                  )}
                                 </span>
                               </button>
                             </th>
@@ -1613,13 +1823,17 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() =>
-                                  handleSubSummarySort("monto_contratado")
+                                  handleSubSummarySort(
+                                    "monto_contratado"
+                                  )
                                 }
                                 className="inline-flex items-center gap-1 hover:text-slate-200"
                               >
                                 Monto contrat.
                                 <span>
-                                  {subSummarySortIndicator("monto_contratado")}
+                                  {subSummarySortIndicator(
+                                    "monto_contratado"
+                                  )}
                                 </span>
                               </button>
                             </th>
@@ -1650,7 +1864,9 @@ export default function App() {
                                   {s.contracts}
                                 </td>
                                 <td className="py-1 px-1 text-right text-slate-200 whitespace-nowrap">
-                                  {formatCurrency(s.monto_contratado)}
+                                  {formatCurrency(
+                                    s.monto_contratado
+                                  )}
                                 </td>
                                 <td className="py-1 pl-1">
                                   <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
@@ -1703,6 +1919,15 @@ export default function App() {
                   {filteredData.length} órdenes de servicio
                 </span>
 
+                <button
+                  type="button"
+                  onClick={handleExportDetalle}
+                  className="inline-flex items-center gap-1 text-[11px] text-sky-300 hover:text-sky-100 border border-sky-500/60 px-2 py-1 rounded-md bg-slate-900/60"
+                >
+                  <Download size={14} />
+                  Exportar detalle
+                </button>
+
                 {/* Scroll tipo Procore */}
                 {scrollMax > 0 && (
                   <div className="flex items-center gap-2 text-[11px] text-slate-300">
@@ -1738,17 +1963,21 @@ export default function App() {
             </div>
 
             <div
-              className="overflow-x-hidden overflow-y-auto max-h-[520px]"
+              className="overflow-x-auto overflow-y-auto max-h-[520px]"
               ref={bottomScrollRef}
             >
               <table className="w-full min-w-[1400px] text-[13px] text-left">
                 <thead className="bg-slate-950/90 backdrop-blur-sm text-slate-300 font-semibold border-b border-slate-800 sticky top-0 z-20">
                   <tr>
-                    <th className="px-3 py-2">Proveedor / Especialidad</th>
+                    <th className="px-3 py-2">
+                      Proveedor / Especialidad
+                    </th>
                     <th className="px-3 py-2">
                       <button
                         type="button"
-                        onClick={() => handleDetailSort("orden_servicio")}
+                        onClick={() =>
+                          handleDetailSort("orden_servicio")
+                        }
                         className="inline-flex items-center gap-1"
                       >
                         O.S. / Subcontrato
@@ -1838,7 +2067,9 @@ export default function App() {
                     <th className="px-2 py-2 text-center whitespace-nowrap">
                       Estado
                     </th>
-                    <th className="px-3 py-2 whitespace-nowrap">Notas internas</th>
+                    <th className="px-3 py-2 whitespace-nowrap">
+                      Notas internas
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
@@ -1911,19 +2142,25 @@ export default function App() {
                           {formatCurrency(item.adelanto || 0)}
                         </td>
                         <td className="px-2 py-2 text-right text-slate-200 whitespace-nowrap">
-                          {formatCurrency(item.adelanto_amortizado || 0)}
+                          {formatCurrency(
+                            item.adelanto_amortizado || 0
+                          )}
                         </td>
                         <td className="px-2 py-2 text-center whitespace-nowrap">
                           <input
                             type="checkbox"
                             className="h-4 w-4 text-emerald-500 rounded border-slate-500 focus:ring-emerald-500"
                             checked={!!item.cerrado}
-                            onChange={() => handleToggleCerrado(item.id)}
+                            onChange={() =>
+                              handleToggleCerrado(item.id)
+                            }
                           />
                         </td>
                         <td className="px-2 py-2 text-center whitespace-nowrap">
                           <div className="flex justify-center">
-                            <Badge type={item.estado}>{item.estado}</Badge>
+                            <Badge type={item.estado}>
+                              {item.estado}
+                            </Badge>
                           </div>
                         </td>
                         <td className="px-3 py-2 min-w-[200px]">
@@ -1932,7 +2169,10 @@ export default function App() {
                             placeholder="Notas internas (no se pierden al importar otro Excel)..."
                             value={item.observacion_manual || ""}
                             onChange={(e) =>
-                              handleChangeObservacion(item.id, e.target.value)
+                              handleChangeObservacion(
+                                item.id,
+                                e.target.value
+                              )
                             }
                           />
                         </td>
@@ -1946,6 +2186,86 @@ export default function App() {
             {sortedDetailData.length === 0 && (
               <div className="p-10 text-center text-slate-500">
                 <p>No se encontraron datos con los filtros actuales.</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* AJUSTES */}
+        {activeTab === "ajustes" && (
+          <section className="bg-slate-900/80 rounded-2xl shadow-md border border-slate-800 p-6 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Settings className="text-sky-400" size={18} />
+              <h3 className="font-semibold text-sm text-slate-100">
+                Ajustes del dashboard (uso interno)
+              </h3>
+            </div>
+
+            {!isAdmin && (
+              <div className="max-w-sm space-y-3">
+                <p className="text-xs text-slate-400">
+                  Para acceder a las opciones de mantenimiento (reset de
+                  datos y export global), ingresa la clave de
+                  administrador.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    className="flex-1 px-3 py-2 border border-slate-700 rounded-lg bg-slate-950/60 text-sm text-slate-100 focus:ring-2 focus:ring-sky-500 outline-none"
+                    placeholder="Clave de administrador"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAdminLogin}
+                    className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-sky-600 text-xs font-semibold hover:bg-sky-500"
+                  >
+                    Acceder
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Nota: en GitHub Pages los datos solo se guardan en el
+                  navegador de cada usuario (localStorage). Para que otras
+                  personas vean siempre la misma versión, es necesario
+                  actualizar el repositorio con el dataset consolidado.
+                </p>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-300">
+                  Estás en modo administrador. Desde aquí puedes resetear
+                  los datos cargados en este navegador y exportar el
+                  dataset completo a Excel.
+                </p>
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleResetData}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-700 text-xs font-semibold hover:bg-rose-600 border border-rose-500"
+                  >
+                    <Trash2 size={14} />
+                    Resetear datos / borrar último Excel
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportDatasetCompleto}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-700 text-xs font-semibold hover:bg-sky-600 border border-sky-500"
+                  >
+                    <Download size={14} />
+                    Exportar dataset completo
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500">
+                  Importante: la clave de acceso se valida en el propio
+                  navegador y no es un mecanismo de seguridad fuerte. Está
+                  pensado como control básico de uso interno.
+                </p>
               </div>
             )}
           </section>
