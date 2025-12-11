@@ -917,17 +917,39 @@ export default function App() {
 
   // KPIs
   const kpis = useMemo(() => {
+    // Monto total contratado con IGV
     const totalContratado = filteredData.reduce(
       (acc, curr) => acc + (curr.contratado || 0),
       0
     );
-    const totalCosto = filteredData.reduce(
+
+    // Costo directo acumulado (valorizado a la fecha)
+    const totalCdAcumulado = filteredData.reduce(
       (acc, curr) => acc + (curr.costo_directo || 0),
       0
     );
+
+    // Costo directo contratado (sin IGV)
+    const totalCdContratado = filteredData.reduce(
+      (acc, curr) =>
+        acc +
+        (curr.monto_costo_directo_os ||
+          (curr.contratado ? curr.contratado / 1.18 : 0)),
+      0
+    );
+
+    // % Avance físico global = CD acumulado / CD contratado
     const avgAvance =
-      totalContratado > 0 ? (totalCosto / totalContratado) * 100 : 0;
-    return { totalContratado, totalCosto, avgAvance };
+      totalCdContratado > 0
+        ? (totalCdAcumulado / totalCdContratado) * 100
+        : 0;
+
+    return {
+      totalContratado,
+      totalCdAcumulado,
+      totalCdContratado,
+      avgAvance,
+    };
   }, [filteredData]);
 
   // resumen por subcontratista
@@ -1005,17 +1027,31 @@ export default function App() {
       .slice(0, 20);
   }, [filteredData]);
 
+  // Fuente de datos para el cálculo de FG:
+  // - Sin simulación: todas las OS filtradas
+  // - Con simulación: solo la OS seleccionada en el simulador
+  const fgSourceData = useMemo(() => {
+    if (!simulatedId) return filteredData;
+
+    const simItem = simulationItems.find(
+      (x) => x.simId === simulatedId
+    );
+    if (!simItem) return filteredData;
+
+    return filteredData.filter((d) => d.id === simItem.contratoId);
+  }, [filteredData, simulationItems, simulatedId]);
+
   // Fondo de garantía
   const fgMetrics = useMemo(() => {
-    const totalCdAcum = filteredData.reduce(
+    const totalCdAcum = fgSourceData.reduce(
       (acc, curr) => acc + (curr.costo_directo || 0),
       0
     );
-    const totalRetenido = filteredData.reduce(
+    const totalRetenido = fgSourceData.reduce(
       (acc, curr) => acc + (curr.retenido || 0),
       0
     );
-    const totalAdelCalc = filteredData.reduce(
+    const totalAdelCalc = fgSourceData.reduce(
       (acc, curr) =>
         acc +
         (curr.adelanto_calculado != null
@@ -1023,7 +1059,7 @@ export default function App() {
           : curr.adelanto || 0),
       0
     );
-    const totalAdelAmort = filteredData.reduce(
+    const totalAdelAmort = fgSourceData.reduce(
       (acc, curr) => acc + (curr.adelanto_amortizado || 0),
       0
     );
@@ -1039,7 +1075,7 @@ export default function App() {
       fgAdelTotal,
       fgAdelAmortizado,
     };
-  }, [filteredData]);
+  }, [fgSourceData]);
 
   // Ordenamiento detalle
   const sortedDetailData = useMemo(() => {
@@ -1489,27 +1525,34 @@ export default function App() {
         {/* DASHBOARD */}
         {activeTab === "dashboard" && (
           <>
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-6">
               <Card
-                title="Monto total contratado"
+                title="MONTO TOTAL CONTRATADO"
                 value={formatCurrency(kpis.totalContratado)}
                 icon={Briefcase}
                 color="blue"
                 subtext={`${filteredData.length} OS filtradas`}
               />
               <Card
-                title="Costo directo acumulado"
-                value={formatCurrency(kpis.totalCosto)}
+                title="COSTO DIRECTO CONTRATADO"
+                value={formatCurrency(kpis.totalCdContratado)}
+                icon={DollarSign}
+                color="emerald"
+                subtext="Sin IGV (base de avance)"
+              />
+              <Card
+                title="COSTO DIRECTO ACUMULADO"
+                value={formatCurrency(kpis.totalCdAcumulado)}
                 icon={DollarSign}
                 color="green"
                 subtext="Valorizado a la fecha"
               />
               <Card
-                title="Avance físico global"
+                title="AVANCE FÍSICO GLOBAL"
                 value={formatPct(kpis.avgAvance)}
                 icon={TrendingUp}
                 color="amber"
-                subtext="Ponderado por monto"
+                subtext={`CD acum.: ${formatCurrency(kpis.totalCdAcumulado)}`}
               />
             </section>
 
