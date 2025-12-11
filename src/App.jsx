@@ -251,27 +251,78 @@ const parseSubcontratosAdministrador = (matrix) => {
     (h1, h2) =>
       contains(h1, "Costo Directo") || contains(h2, "Costo Directo")
   );
-  const idxRetenido = findCol(
+  // -----------------------------------------------------------------------------
+  // -----------------------------------------------------------------------------
+    const idxRetenido = findCol(
     (h1, h2) => contains(h1, "Retenido") || contains(h2, "Retenido")
   );
-  const idxAdelCalc = findCol(
+  // Columnas de adelantos: soporta cabeceras combinadas
+  // Ejemplo: fila 1 -> "Adelantos (S/.)", fila 2 -> "Calculado / Otorgado / Amortizado"
+  let idxAdelCalc = findCol(
     (h1, h2) =>
-      (contains(h1, "Adelanto") || contains(h1, "Adelantos")) &&
+      (contains(h1, "Adelanto") ||
+        contains(h1, "Adelantos") ||
+        contains(h2, "Adelanto")) &&
       (contains(h2, "Calculado") || contains(h2, "Calc"))
   );
-  const idxAdelAmort = findCol(
+  let idxAdelAmort = findCol(
     (h1, h2) =>
       (contains(h1, "Adelanto") ||
         contains(h1, "Adelantos") ||
         contains(h2, "Adelanto")) &&
       (contains(h2, "Amort") || contains(h1, "Amort"))
   );
-  const idxAdelOtorg = findCol(
+  let idxAdelOtorg = findCol(
     (h1, h2) =>
-      (contains(h1, "Adelanto") || contains(h1, "Adelantos")) &&
+      (contains(h1, "Adelanto") ||
+        contains(h1, "Adelantos") ||
+        contains(h2, "Adelanto")) &&
       contains(h2, "Otorg")
   );
+  // Fallback robusto para layouts donde la cabecera de la fila 1
+  // solo indica "Adelantos (S/.)" y la fila 2 define "Calculado", "Otorgado", "Amortizado"
+  const idxAdelBase = header1.findIndex((cell) =>
+    contains(normalizeText(cell), "Adelanto") ||
+    contains(normalizeText(cell), "Adelantos")
+  );
+
+  if (idxAdelBase !== -1) {
+    const searchEnd = Math.min(header1.length, idxAdelBase + 4);
+
+    if (idxAdelCalc === -1) {
+      for (let i = idxAdelBase; i < searchEnd; i += 1) {
+        const h2 = normalizeText(header2[i]);
+        if (contains(h2, "Calculado") || contains(h2, "Calc")) {
+          idxAdelCalc = i;
+          break;
+        }
+      }
+    }
+
+    if (idxAdelOtorg === -1) {
+      for (let i = idxAdelBase; i < searchEnd; i += 1) {
+        const h2 = normalizeText(header2[i]);
+        if (contains(h2, "Otorg")) {
+          idxAdelOtorg = i;
+          break;
+        }
+      }
+    }
+
+    if (idxAdelAmort === -1) {
+      for (let i = idxAdelBase; i < searchEnd; i += 1) {
+        const h2 = normalizeText(header2[i]);
+        if (contains(h2, "Amort")) {
+          idxAdelAmort = i;
+          break;
+        }
+      }
+    }
+  }
+
   const idxPendientePor = findCol((h1) => contains(h1, "Pendiente por"));
+  //-----------------------------------------------------------------------------
+  //-----------------------------------------------------------------------------
   const idxOCOS = findCol((h1) => contains(h1, "O.C.") || contains(h1, "O.S."));
 
   if (
